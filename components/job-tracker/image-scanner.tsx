@@ -71,7 +71,7 @@ export function ImageScanner({ onClose, onResult }: ImageScannerProps) {
     setError(null)
 
     try {
-      const response = await fetch("/api/ocr-job", {
+      const response = await fetch("/api/ocr", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ image }),
@@ -82,7 +82,7 @@ export function ImageScanner({ onClose, onResult }: ImageScannerProps) {
       }
 
       const result = await response.json()
-      
+
       if (result.data) {
         onResult({
           company: result.data.company || "",

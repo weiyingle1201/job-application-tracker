@@ -9,12 +9,8 @@ import { ApplicationDetail } from "@/components/job-tracker/application-detail"
 import { ResumeManager } from "@/components/job-tracker/resume-manager"
 import { FilterBar } from "@/components/job-tracker/filter-bar"
 import { ImageScanner } from "@/components/job-tracker/image-scanner"
+import { applicationsApi, resumesApi } from "@/lib/api"
 import type { Application, Resume, FilterOptions } from "@/lib/types"
-
-const STORAGE_KEYS = {
-  applications: "job-tracker-applications",
-  resumes: "job-tracker-resumes",
-}
 
 export default function JobTrackerPage() {
   const [applications, setApplications] = useState<Application[]>([])
@@ -35,82 +31,87 @@ export default function JobTrackerPage() {
     status: "all",
     location: "all",
   })
-  const [isLoaded, setIsLoaded] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Load data from localStorage
+  // Load data from API
   useEffect(() => {
-    const savedApps = localStorage.getItem(STORAGE_KEYS.applications)
-    const savedResumes = localStorage.getItem(STORAGE_KEYS.resumes)
-    
-    if (savedApps) {
-      // Migrate old data to include new fields
-      const parsed = JSON.parse(savedApps) as Application[]
-      const migrated = parsed.map(app => ({
-        ...app,
-        channel: app.channel || "其他",
-        timeline: app.timeline || [],
-        reviewDocs: app.reviewDocs || [],
-      }))
-      setApplications(migrated)
+    async function loadData() {
+      try {
+        setIsLoading(true)
+        setError(null)
+        const [appsData, resumesData] = await Promise.all([
+          applicationsApi.getAll(),
+          resumesApi.getAll(),
+        ])
+        setApplications(appsData)
+        setResumes(resumesData)
+      } catch (err) {
+        console.error("Failed to load data:", err)
+        setError("加载数据失败，请检查网络连接")
+      } finally {
+        setIsLoading(false)
+      }
     }
-    if (savedResumes) {
-      setResumes(JSON.parse(savedResumes))
-    }
-    setIsLoaded(true)
+    loadData()
   }, [])
 
-  // Save applications to localStorage
-  useEffect(() => {
-    if (isLoaded) {
-      localStorage.setItem(STORAGE_KEYS.applications, JSON.stringify(applications))
+  const handleAddApplication = useCallback(async (app: Omit<Application, "id" | "createdAt">) => {
+    try {
+      const newApp = await applicationsApi.create(app)
+      setApplications((prev) => [newApp, ...prev])
+      setShowForm(false)
+      setScannedData(null)
+    } catch (err) {
+      console.error("Failed to create application:", err)
+      setError("创建失败，请重试")
     }
-  }, [applications, isLoaded])
-
-  // Save resumes to localStorage
-  useEffect(() => {
-    if (isLoaded) {
-      localStorage.setItem(STORAGE_KEYS.resumes, JSON.stringify(resumes))
-    }
-  }, [resumes, isLoaded])
-
-  const handleAddApplication = useCallback((app: Omit<Application, "id" | "createdAt">) => {
-    const newApp: Application = {
-      ...app,
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      timeline: app.timeline || [],
-      reviewDocs: app.reviewDocs || [],
-    }
-    setApplications((prev) => [newApp, ...prev])
-    setShowForm(false)
-    setScannedData(null)
   }, [])
 
-  const handleUpdateApplication = useCallback((updatedApp: Application) => {
-    setApplications((prev) =>
-      prev.map((app) => (app.id === updatedApp.id ? updatedApp : app))
-    )
-    setSelectedApp(updatedApp)
-    setEditingApp(null)
-    setShowForm(false)
-  }, [])
-
-  const handleDeleteApplication = useCallback((id: string) => {
-    setApplications((prev) => prev.filter((app) => app.id !== id))
-    setSelectedApp(null)
-  }, [])
-
-  const handleAddResume = useCallback((resume: Omit<Resume, "id" | "uploadedAt">) => {
-    const newResume: Resume = {
-      ...resume,
-      id: crypto.randomUUID(),
-      uploadedAt: new Date().toISOString(),
+  const handleUpdateApplication = useCallback(async (updatedApp: Application) => {
+    try {
+      const result = await applicationsApi.update(updatedApp)
+      setApplications((prev) =>
+        prev.map((app) => (app.id === result.id ? result : app))
+      )
+      setSelectedApp(result)
+      setEditingApp(null)
+      setShowForm(false)
+    } catch (err) {
+      console.error("Failed to update application:", err)
+      setError("更新失败，请重试")
     }
-    setResumes((prev) => [newResume, ...prev])
   }, [])
 
-  const handleDeleteResume = useCallback((id: string) => {
-    setResumes((prev) => prev.filter((r) => r.id !== id))
+  const handleDeleteApplication = useCallback(async (id: string) => {
+    try {
+      await applicationsApi.delete(id)
+      setApplications((prev) => prev.filter((app) => app.id !== id))
+      setSelectedApp(null)
+    } catch (err) {
+      console.error("Failed to delete application:", err)
+      setError("删除失败，请重试")
+    }
+  }, [])
+
+  const handleAddResume = useCallback(async (resume: Omit<Resume, "id" | "uploadedAt">) => {
+    try {
+      const newResume = await resumesApi.create(resume)
+      setResumes((prev) => [newResume, ...prev])
+    } catch (err) {
+      console.error("Failed to create resume:", err)
+      setError("上传简历失败，请重试")
+    }
+  }, [])
+
+  const handleDeleteResume = useCallback(async (id: string) => {
+    try {
+      await resumesApi.delete(id)
+      setResumes((prev) => prev.filter((r) => r.id !== id))
+    } catch (err) {
+      console.error("Failed to delete resume:", err)
+      setError("删除简历失败，请重试")
+    }
   }, [])
 
   // Filter applications
@@ -119,7 +120,7 @@ export default function JobTrackerPage() {
       filters.search === "" ||
       app.company.toLowerCase().includes(filters.search.toLowerCase()) ||
       app.position.toLowerCase().includes(filters.search.toLowerCase())
-    
+
     const matchesStatus = filters.status === "all" || app.status === filters.status
     const matchesLocation = filters.location === "all" || app.location === filters.location
 
@@ -129,7 +130,7 @@ export default function JobTrackerPage() {
   // Get unique locations for filter
   const locations = [...new Set(applications.map((app) => app.location).filter(Boolean))]
 
-  if (!isLoaded) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-muted-foreground">加载中...</div>
@@ -148,16 +149,28 @@ export default function JobTrackerPage() {
         onResumeClick={() => setShowResumeManager(true)}
         onScanClick={() => setShowImageScanner(true)}
       />
-      
+
       <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+        {error && (
+          <div className="bg-destructive/10 text-destructive px-4 py-2 rounded-lg">
+            {error}
+            <button
+              onClick={() => setError(null)}
+              className="ml-2 underline"
+            >
+              关闭
+            </button>
+          </div>
+        )}
+
         <StatsPanel applications={applications} />
-        
+
         <FilterBar
           filters={filters}
           onFiltersChange={setFilters}
           locations={locations}
         />
-        
+
         <ApplicationList
           applications={filteredApplications}
           onSelect={setSelectedApp}
